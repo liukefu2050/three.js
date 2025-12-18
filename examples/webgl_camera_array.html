@@ -18,94 +18,119 @@
 
 		<script type="module">
 
+			// 导入 Three.js 核心库
 			import * as THREE from 'three';
 
+			// ====== 全局变量 ======
 			let camera, scene, renderer;
-			let mesh;
-			const AMOUNT = 6;
+			let mesh; // 场景中旋转的圆柱体
+			const AMOUNT = 6; // 相机网格行列数 6x6 = 36 个相机
 
+			// 初始化
 			init();
 
+			// ====== 初始化函数 ======
 			function init() {
 
+				// 屏幕宽高比
 				const ASPECT_RATIO = window.innerWidth / window.innerHeight;
 
+				// 每个子视口的宽高（考虑设备像素比）
 				const WIDTH = ( window.innerWidth / AMOUNT ) * window.devicePixelRatio;
 				const HEIGHT = ( window.innerHeight / AMOUNT ) * window.devicePixelRatio;
 
+				// 存放所有子相机
 				const cameras = [];
 
+				// ====== 创建 6x6 个子相机 ======
 				for ( let y = 0; y < AMOUNT; y ++ ) {
-
 					for ( let x = 0; x < AMOUNT; x ++ ) {
 
+						// 创建透视相机
 						const subcamera = new THREE.PerspectiveCamera( 40, ASPECT_RATIO, 0.1, 10 );
-						subcamera.viewport = new THREE.Vector4( Math.floor( x * WIDTH ), Math.floor( y * HEIGHT ), Math.ceil( WIDTH ), Math.ceil( HEIGHT ) );
+
+						// 设置每个子相机的视口（左下角 x,y，宽高）
+						subcamera.viewport = new THREE.Vector4(
+							Math.floor( x * WIDTH ),
+							Math.floor( y * HEIGHT ),
+							Math.ceil( WIDTH ),
+							Math.ceil( HEIGHT )
+						);
+
+						// 设置子相机在单位网格中的位置（均匀分布）
 						subcamera.position.x = ( x / AMOUNT ) - 0.5;
 						subcamera.position.y = 0.5 - ( y / AMOUNT );
 						subcamera.position.z = 1.5;
-						subcamera.position.multiplyScalar( 2 );
+						subcamera.position.multiplyScalar( 2 ); // 放大位置
+
+						// 子相机朝向原点
 						subcamera.lookAt( 0, 0, 0 );
+
+						// 更新世界矩阵
 						subcamera.updateMatrixWorld();
+
 						cameras.push( subcamera );
-
 					}
-
 				}
 
+				// 使用 ArrayCamera 聚合子相机
 				camera = new THREE.ArrayCamera( cameras );
-				camera.position.z = 3;
+				camera.position.z = 3; // ArrayCamera 整体位置
 
+				// ====== 场景 ======
 				scene = new THREE.Scene();
 
+				// 环境光
 				scene.add( new THREE.AmbientLight( 0x999999 ) );
 
+				// 方向光
 				const light = new THREE.DirectionalLight( 0xffffff, 3 );
 				light.position.set( 0.5, 0.5, 1 );
 				light.castShadow = true;
-				light.shadow.camera.zoom = 4; // tighter shadow map
+				light.shadow.camera.zoom = 4; // 调整阴影贴图
 				scene.add( light );
 
+				// 背景平面
 				const geometryBackground = new THREE.PlaneGeometry( 100, 100 );
 				const materialBackground = new THREE.MeshPhongMaterial( { color: 0x000066 } );
-
 				const background = new THREE.Mesh( geometryBackground, materialBackground );
-				background.receiveShadow = true;
+				background.receiveShadow = true; // 接收阴影
 				background.position.set( 0, 0, - 1 );
 				scene.add( background );
 
+				// 场景中的圆柱体
 				const geometryCylinder = new THREE.CylinderGeometry( 0.5, 0.5, 1, 32 );
 				const materialCylinder = new THREE.MeshPhongMaterial( { color: 0xff0000 } );
-
 				mesh = new THREE.Mesh( geometryCylinder, materialCylinder );
 				mesh.castShadow = true;
 				mesh.receiveShadow = true;
 				scene.add( mesh );
 
+				// ====== 渲染器 ======
 				renderer = new THREE.WebGLRenderer();
 				renderer.setPixelRatio( window.devicePixelRatio );
 				renderer.setSize( window.innerWidth, window.innerHeight );
-				renderer.setAnimationLoop( animate );
-				renderer.shadowMap.enabled = true;
+				renderer.setAnimationLoop( animate ); // 循环动画
+				renderer.shadowMap.enabled = true; // 开启阴影
 				document.body.appendChild( renderer.domElement );
 
-				//
-
+				// 监听窗口尺寸变化
 				window.addEventListener( 'resize', onWindowResize );
-
 			}
 
+			// ====== 窗口调整 ======
 			function onWindowResize() {
 
 				const ASPECT_RATIO = window.innerWidth / window.innerHeight;
 				const WIDTH = ( window.innerWidth / AMOUNT ) * window.devicePixelRatio;
 				const HEIGHT = ( window.innerHeight / AMOUNT ) * window.devicePixelRatio;
 
+				// 更新 ArrayCamera 的整体比例
 				camera.aspect = ASPECT_RATIO;
 				camera.updateProjectionMatrix();
 
+				// 更新每个子相机视口和比例
 				for ( let y = 0; y < AMOUNT; y ++ ) {
-
 					for ( let x = 0; x < AMOUNT; x ++ ) {
 
 						const subcamera = camera.cameras[ AMOUNT * y + x ];
@@ -114,29 +139,28 @@
 							Math.floor( x * WIDTH ),
 							Math.floor( y * HEIGHT ),
 							Math.ceil( WIDTH ),
-							Math.ceil( HEIGHT ) );
+							Math.ceil( HEIGHT )
+						);
 
 						subcamera.aspect = ASPECT_RATIO;
 						subcamera.updateProjectionMatrix();
-
 					}
-
 				}
 
 				renderer.setSize( window.innerWidth, window.innerHeight );
-
 			}
 
+			// ====== 动画循环 ======
 			function animate() {
-
+				// 圆柱体旋转动画
 				mesh.rotation.x += 0.005;
 				mesh.rotation.z += 0.01;
 
-				renderer.render( scene, camera );
-
+				renderer.render( scene, camera ); // 使用 ArrayCamera 渲染
 			}
 
 		</script>
+
 
 	</body>
 </html>

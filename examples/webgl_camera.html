@@ -12,8 +12,8 @@
 		</style>
 	</head>
 	<body>
-		<div id="info"><a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> - cameras<br/>
-		<b>O</b> orthographic <b>P</b> perspective
+		<div id="info"><a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> - cameras正交透视<br/>
+		<b>O</b> orthographic 正射投影<b>P</b> perspective 透视、远景
 		</div>
 
 		<script type="importmap">
@@ -27,72 +27,81 @@
 
 		<script type="module">
 
+			// 导入 Three.js 核心库
 			import * as THREE from 'three';
 
+			// 导入性能监控模块
 			import Stats from 'three/addons/libs/stats.module.js';
 
+			// ====== 窗口尺寸和长宽比 ======
 			let SCREEN_WIDTH = window.innerWidth;
 			let SCREEN_HEIGHT = window.innerHeight;
 			let aspect = SCREEN_WIDTH / SCREEN_HEIGHT;
 
+			// ====== 全局变量 ======
 			let container, stats;
-			let camera, scene, renderer, mesh;
-			let cameraRig, activeCamera, activeHelper;
-			let cameraPerspective, cameraOrtho;
-			let cameraPerspectiveHelper, cameraOrthoHelper;
-			const frustumSize = 600;
+			let camera, scene, renderer, mesh; // 主相机、场景、渲染器、主球体
+			let cameraRig, activeCamera, activeHelper; // 相机组、当前激活相机、相机辅助线
+			let cameraPerspective, cameraOrtho; // 透视相机和正交相机
+			let cameraPerspectiveHelper, cameraOrthoHelper; // 相机辅助显示（CameraHelper）
+			const frustumSize = 600; // 正交相机视锥尺寸
 
+			// 初始化
 			init();
 
+			// ====== 初始化函数 ======
 			function init() {
 
+				// 创建渲染容器
 				container = document.createElement( 'div' );
 				document.body.appendChild( container );
 
+				// 创建场景
 				scene = new THREE.Scene();
 
-				//
-
+				// ====== 相机设置 ======
+				// 主透视相机
 				camera = new THREE.PerspectiveCamera( 50, 0.5 * aspect, 1, 10000 );
 				camera.position.z = 2500;
 
+				// 小透视相机（用于左边视图）
 				cameraPerspective = new THREE.PerspectiveCamera( 50, 0.5 * aspect, 150, 1000 );
-
 				cameraPerspectiveHelper = new THREE.CameraHelper( cameraPerspective );
 				scene.add( cameraPerspectiveHelper );
 
-				//
-				cameraOrtho = new THREE.OrthographicCamera( 0.5 * frustumSize * aspect / - 2, 0.5 * frustumSize * aspect / 2, frustumSize / 2, frustumSize / - 2, 150, 1000 );
-
+				// 正交相机（用于左边视图或右边视图对比）
+				cameraOrtho = new THREE.OrthographicCamera(
+					0.5 * frustumSize * aspect / - 2,
+					0.5 * frustumSize * aspect / 2,
+					frustumSize / 2,
+					frustumSize / - 2,
+					150, 1000
+				);
 				cameraOrthoHelper = new THREE.CameraHelper( cameraOrtho );
 				scene.add( cameraOrthoHelper );
 
-				//
-
+				// 默认激活透视相机
 				activeCamera = cameraPerspective;
 				activeHelper = cameraPerspectiveHelper;
 
-
-				// counteract different front orientation of cameras vs rig
-
+				// 修正相机与 rig 的方向差异
 				cameraOrtho.rotation.y = Math.PI;
 				cameraPerspective.rotation.y = Math.PI;
 
+				// ====== 相机组（rig） ======
 				cameraRig = new THREE.Group();
-
 				cameraRig.add( cameraPerspective );
 				cameraRig.add( cameraOrtho );
-
 				scene.add( cameraRig );
 
-				//
-
+				// ====== 创建可视球体 ======
 				mesh = new THREE.Mesh(
 					new THREE.SphereGeometry( 100, 16, 8 ),
 					new THREE.MeshBasicMaterial( { color: 0xffffff, wireframe: true } )
 				);
 				scene.add( mesh );
 
+				// 子球体 mesh2
 				const mesh2 = new THREE.Mesh(
 					new THREE.SphereGeometry( 50, 16, 8 ),
 					new THREE.MeshBasicMaterial( { color: 0x00ff00, wireframe: true } )
@@ -100,6 +109,7 @@
 				mesh2.position.y = 150;
 				mesh.add( mesh2 );
 
+				// 子球体 mesh3（附加到相机 rig 上，用于辅助显示）
 				const mesh3 = new THREE.Mesh(
 					new THREE.SphereGeometry( 5, 16, 8 ),
 					new THREE.MeshBasicMaterial( { color: 0x0000ff, wireframe: true } )
@@ -107,74 +117,60 @@
 				mesh3.position.z = 150;
 				cameraRig.add( mesh3 );
 
-				//
-
+				// ====== 创建粒子点 ======
 				const geometry = new THREE.BufferGeometry();
 				const vertices = [];
 
 				for ( let i = 0; i < 10000; i ++ ) {
-
 					vertices.push( THREE.MathUtils.randFloatSpread( 2000 ) ); // x
 					vertices.push( THREE.MathUtils.randFloatSpread( 2000 ) ); // y
 					vertices.push( THREE.MathUtils.randFloatSpread( 2000 ) ); // z
-
 				}
 
 				geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( vertices, 3 ) );
 
-				const particles = new THREE.Points( geometry, new THREE.PointsMaterial( { color: 0x888888 } ) );
+				const particles = new THREE.Points(
+					geometry,
+					new THREE.PointsMaterial( { color: 0x888888 } )
+				);
 				scene.add( particles );
 
-				//
-
+				// ====== 渲染器 ======
 				renderer = new THREE.WebGLRenderer( { antialias: true } );
 				renderer.setPixelRatio( window.devicePixelRatio );
 				renderer.setSize( SCREEN_WIDTH, SCREEN_HEIGHT );
-				renderer.setAnimationLoop( animate );
+				renderer.setAnimationLoop( animate ); // 动画循环
 				container.appendChild( renderer.domElement );
 
+				// 开启裁剪测试（scissor test），用于左右分屏渲染
 				renderer.setScissorTest( true );
 
-				//
-
+				// ====== 性能面板 ======
 				stats = new Stats();
 				container.appendChild( stats.dom );
 
-				//
-
+				// ====== 事件监听 ======
 				window.addEventListener( 'resize', onWindowResize );
 				document.addEventListener( 'keydown', onKeyDown );
 
 			}
 
-			//
-
+			// ====== 键盘切换相机 ======
 			function onKeyDown( event ) {
-
 				switch ( event.keyCode ) {
-
-					case 79: /*O*/
-
+					case 79: /*O键 - 正交相机*/
 						activeCamera = cameraOrtho;
 						activeHelper = cameraOrthoHelper;
-
 						break;
-
-					case 80: /*P*/
-
+					case 80: /*P键 - 透视相机*/
 						activeCamera = cameraPerspective;
 						activeHelper = cameraPerspectiveHelper;
-
 						break;
-
 				}
-
 			}
 
-			//
-
+			// ====== 窗口尺寸改变 ======
 			function onWindowResize() {
-
 				SCREEN_WIDTH = window.innerWidth;
 				SCREEN_HEIGHT = window.innerHeight;
 				aspect = SCREEN_WIDTH / SCREEN_HEIGHT;
@@ -192,34 +188,32 @@
 				cameraOrtho.top = frustumSize / 2;
 				cameraOrtho.bottom = - frustumSize / 2;
 				cameraOrtho.updateProjectionMatrix();
-
 			}
 
-			//
-
+			// ====== 动画循环 ======
 			function animate() {
-
 				render();
 				stats.update();
-
 			}
 
-
+			// ====== 渲染函数 ======
 			function render() {
 
-				const r = Date.now() * 0.0005;
+				const r = Date.now() * 0.0005; // 时间参数，用于动画
 
+				// 主球体运动轨迹
 				mesh.position.x = 700 * Math.cos( r );
 				mesh.position.z = 700 * Math.sin( r );
 				mesh.position.y = 700 * Math.sin( r );
 
+				// 子球体 mesh2 相对运动
 				mesh.children[ 0 ].position.x = 70 * Math.cos( 2 * r );
 				mesh.children[ 0 ].position.z = 70 * Math.sin( r );
 
+				// ====== 根据当前激活相机更新相机属性 ======
 				if ( activeCamera === cameraPerspective ) {
-
-					cameraPerspective.fov = 35 + 30 * Math.sin( 0.5 * r );
-					cameraPerspective.far = mesh.position.length();
+					cameraPerspective.fov = 35 + 30 * Math.sin( 0.5 * r ); // 动态 FOV
+					cameraPerspective.far = mesh.position.length(); // 更新远裁剪面
 					cameraPerspective.updateProjectionMatrix();
 
 					cameraPerspectiveHelper.update();
@@ -228,40 +222,37 @@
 					cameraOrthoHelper.visible = false;
 
 				} else {
-
-					cameraOrtho.far = mesh.position.length();
+					cameraOrtho.far = mesh.position.length(); // 更新远裁剪面
 					cameraOrtho.updateProjectionMatrix();
 
 					cameraOrthoHelper.update();
 					cameraOrthoHelper.visible = true;
 
 					cameraPerspectiveHelper.visible = false;
-
 				}
 
+				// 相机组始终面向主球体
 				cameraRig.lookAt( mesh.position );
 
-				//
-
+				// ====== 左右分屏渲染 ======
 				activeHelper.visible = false;
 
 				renderer.setClearColor( 0x000000, 1 );
-				renderer.setScissor( 0, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT );
+				renderer.setScissor( 0, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT ); // 左半屏
 				renderer.setViewport( 0, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT );
 				renderer.render( scene, activeCamera );
-
-				//
 
 				activeHelper.visible = true;
 
 				renderer.setClearColor( 0x111111, 1 );
-				renderer.setScissor( SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT );
+				renderer.setScissor( SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT ); // 右半屏
 				renderer.setViewport( SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT );
 				renderer.render( scene, camera );
 
 			}
 
 		</script>
+
 
 	</body>
 </html>
