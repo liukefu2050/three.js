@@ -18,6 +18,9 @@
 			BatchedMesh with 10 geometries and 500k instances.<br>
 			Each geometry has 5 LODs (4 generated with meshoptimizer). <br>
 			Frustum culling and raycasting are accelerated by using BVHs (TLAS & BLAS). <br>
+			包含 10 个几何体和 50 万个实例的 BatchedMesh。<br>
+			每个几何体有 5 个 LOD（其中 4 个使用 meshoptimizer 生成）。<br>
+			通过使用 BVH（TLAS 和 BLAS）加速视锥体剔除和光线投射。<br>
 		</div>
 
 		<script type="importmap">
@@ -39,75 +42,90 @@
 
 		<script type="module">
 
+			// 导入 Three.js 核心库
 			import * as THREE from 'three';
+
+			// 导入性能统计模块
 			import Stats from 'three/addons/libs/stats.module.js';
+
+			// 导入地图控制器（可平移、缩放、旋转摄像机）
 			import { MapControls } from 'three/addons/controls/MapControls.js';
+
+			// 导入室内环境预设（光照贴图生成用）
 			import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+			// 导入 GUI 调试面板
 			import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 
+			// 导入 BVH（加速射线检测）相关扩展
 			import { acceleratedRaycast, computeBatchedBoundsTree } from 'three-mesh-bvh';
 
+			// 导入批量网格扩展与 LOD（细节等级）功能
 			import { createRadixSort, extendBatchedMeshPrototype, getBatchedMeshLODCount } from '@three.ez/batched-mesh-extensions';
 			import { performanceRangeLOD, simplifyGeometriesByErrorLOD } from '@three.ez/simplify-geometry';
 
-			// add and override BatchedMesh methods ( @three.ez/batched-mesh-extensions )
+			// 扩展 BatchedMesh 原型，增加额外方法
 			extendBatchedMeshPrototype();
 
-			// add the extension functions ( three-mesh-bvh )
+			// 替换 Mesh 的 raycast 方法为加速版本
 			THREE.Mesh.prototype.raycast = acceleratedRaycast;
+			// 为 BatchedMesh 添加 BVH 计算方法
 			THREE.BatchedMesh.prototype.computeBoundsTree = computeBatchedBoundsTree;
 
-			let stats;
+			// 声明全局变量
+			let stats; // 性能面板
 			let camera, scene, renderer;
 
-			const instancesCount = 500000;
+			const instancesCount = 500000; // 实例数量
 			let batchedMesh;
-			let lastHoveredInstance = null;
-			const lastHoveredColor = new THREE.Color();
-			const highlight = new THREE.Color( 'red' );
+			let lastHoveredInstance = null; // 上一次鼠标悬停的实例 ID
+			const lastHoveredColor = new THREE.Color(); // 保存上一次颜色
+			const highlight = new THREE.Color( 'red' ); // 鼠标悬停高亮色
 
+			// 射线检测
 			const raycaster = new THREE.Raycaster();
-			const mouse = new THREE.Vector2( 1, 1 );
-			const position = new THREE.Vector3();
-			const quaternion = new THREE.Quaternion();
-			const scale = new THREE.Vector3( 1, 1, 1 );
-			const matrix = new THREE.Matrix4();
-			const color = new THREE.Color();
+			const mouse = new THREE.Vector2( 1, 1 ); // 初始化鼠标位置
+			const position = new THREE.Vector3(); // 临时向量
+			const quaternion = new THREE.Quaternion(); // 临时旋转
+			const scale = new THREE.Vector3( 1, 1, 1 ); // 缩放
+			const matrix = new THREE.Matrix4(); // 矩阵
+			const color = new THREE.Color(); // 临时颜色对象
 
+			// 初始化场景
 			init();
 
 			async function init() {
 
-				// renderer
-				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				// ====== 渲染器设置 ======
+				renderer = new THREE.WebGLRenderer( { antialias: true } ); // 开启抗锯齿
 				renderer.setPixelRatio( window.devicePixelRatio );
 				renderer.setSize( window.innerWidth, window.innerHeight );
-				renderer.toneMapping = THREE.ACESFilmicToneMapping;
-				renderer.toneMappingExposure = 0.8;
+				renderer.toneMapping = THREE.ACESFilmicToneMapping; // 色调映射
+				renderer.toneMappingExposure = 0.8; // 曝光度
 				document.body.appendChild( renderer.domElement );
 
-				//
-
+				// ====== 场景 ======
 				scene = new THREE.Scene();
-
 				const pmremGenerator = new THREE.PMREMGenerator( renderer );
+				// 生成环境贴图（室内环境）
 				scene.environment = pmremGenerator.fromScene( new RoomEnvironment(), 0.04 ).texture;
 
-				//
-
+				// ====== 相机 ======
 				camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 0.1, 1000 );
 				camera.position.set( 0, 20, 55 );
 
-				//
-
+				// 射线只检测第一个相交对象
 				raycaster.firstHitOnly = true;
 
+				// ====== 性能监控 ======
 				stats = new Stats();
 				document.body.appendChild( stats.dom );
 
+				// ====== 控制器 ======
 				const controls = new MapControls( camera, renderer.domElement );
-				controls.maxPolarAngle = Math.PI / 2;
+				controls.maxPolarAngle = Math.PI / 2; // 限制垂直旋转角度
 
+				// ====== 原始几何体 ======
 				const geometries = [
 					new THREE.TorusKnotGeometry( 1, 0.4, 256, 32, 1, 1 ),
 					new THREE.TorusKnotGeometry( 1, 0.4, 256, 32, 1, 2 ),
@@ -121,160 +139,136 @@
 					new THREE.TorusKnotGeometry( 1, 0.4, 256, 32, 5, 3 )
 				];
 
-				// generate 4 LODs (levels of detail) for each geometry
+				// 生成每个几何体的多级 LOD（4 个级别）
 				const geometriesLODArray = await simplifyGeometriesByErrorLOD( geometries, 4, performanceRangeLOD );
 
-				// create BatchedMesh
+				// ====== 创建 BatchedMesh ======
 				const { vertexCount, indexCount, LODIndexCount } = getBatchedMeshLODCount( geometriesLODArray );
-				batchedMesh = new THREE.BatchedMesh( instancesCount, vertexCount, indexCount, new THREE.MeshStandardMaterial( { metalness: 1, roughness: 0.8 } ) );
-			
-				// enable radix sort for better performance
+				batchedMesh = new THREE.BatchedMesh(
+					instancesCount,
+					vertexCount,
+					indexCount,
+					new THREE.MeshStandardMaterial( { metalness: 1, roughness: 0.8 } )
+				);
+
+				// 启用基数排序提高渲染性能
 				batchedMesh.customSort = createRadixSort( batchedMesh );
 
-				// add geometries and their LODs to the batched mesh ( all LODs share the same position array )
+				// ====== 添加几何体及其 LOD 到 BatchedMesh ======
 				for ( let i = 0; i < geometriesLODArray.length; i ++ ) {
-
 					const geometryLOD = geometriesLODArray[ i ];
 					const geometryId = batchedMesh.addGeometry( geometryLOD[ 0 ], - 1, LODIndexCount[ i ] );
 					batchedMesh.addGeometryLOD( geometryId, geometryLOD[ 1 ], 50 );
 					batchedMesh.addGeometryLOD( geometryId, geometryLOD[ 2 ], 100 );
 					batchedMesh.addGeometryLOD( geometryId, geometryLOD[ 3 ], 125 );
 					batchedMesh.addGeometryLOD( geometryId, geometryLOD[ 4 ], 200 );
-			
 				}
 
-				// place instances in a 2D grid with randomized rotation and color
+				// ====== 放置实例 ======
 				const sqrtCount = Math.ceil( Math.sqrt( instancesCount ) );
 				const size = 5.5;
 				const start = ( sqrtCount / - 2 * size ) + ( size / 2 );
 
 				for ( let i = 0; i < instancesCount; i ++ ) {
-
-					const r = Math.floor( i / sqrtCount );
-					const c = i % sqrtCount;
+					const r = Math.floor( i / sqrtCount ); // 行
+					const c = i % sqrtCount; // 列
 					const id = batchedMesh.addInstance( Math.floor( Math.random() * geometriesLODArray.length ) );
-					position.set( c * size + start, 0, r * size + start );
-					quaternion.random();
+					position.set( c * size + start, 0, r * size + start ); // 设置位置
+					quaternion.random(); // 随机旋转
 					batchedMesh.setMatrixAt( id, matrix.compose( position, quaternion, scale ) );
-					batchedMesh.setColorAt( id, color.setHSL( Math.random(), 0.6, 0.5 ) );
-			
+					batchedMesh.setColorAt( id, color.setHSL( Math.random(), 0.6, 0.5 ) ); // 随机颜色
 				}
 
-				// compute blas (bottom-level acceleration structure) bvh ( three-mesh-bvh )
-				batchedMesh.computeBoundsTree();
+				// ====== 构建加速结构 ======
+				batchedMesh.computeBoundsTree(); // BLAS（底层加速结构）
+				batchedMesh.computeBVH( THREE.WebGLCoordinateSystem ); // TLAS（顶层加速结构）
 
-				// compute tlas (top-level acceleration structure) bvh ( @three.ez/batched-mesh-extensions )
-				batchedMesh.computeBVH( THREE.WebGLCoordinateSystem );
-			
 				scene.add( batchedMesh );
-			
-				// set up gui
-				const config = {
-					freeze: false,
-					useBVH: true,
-					useLOD: true
-				};
-			
+
+				// ====== GUI 设置 ======
+				const config = { freeze: false, useBVH: true, useLOD: true };
 				const bvh = batchedMesh.bvh;
 				const lods = batchedMesh._geometryInfo.map( x => x.LOD );
 				const onBeforeRender = batchedMesh.onBeforeRender;
-			
+
 				const gui = new GUI();
-
-				gui.add( batchedMesh, 'instanceCount' ).disable();
-			
+				gui.add( batchedMesh, 'instanceCount' ).disable(); // 显示实例数量
 				gui.add( config, 'freeze' ).onChange( v => {
+					batchedMesh.onBeforeRender = v ? () => {} : onBeforeRender; // 冻结渲染更新
+				});
 
-					batchedMesh.onBeforeRender = v ? () => {} : onBeforeRender;
-
-				} );
-
-				const frustumCullingFolder = gui.addFolder( 'Frustum culling & raycasting' );
+				const frustumCullingFolder = gui.addFolder( 'Frustum culling & raycasting' );// 视锥体剔除和光线投射
 				frustumCullingFolder.add( config, 'useBVH' ).onChange( v => {
-
-					batchedMesh.bvh = v ? bvh : null;
-
-				} );
+					batchedMesh.bvh = v ? bvh : null; // 开关 BVH
+				});
 
 				const geometriesFolder = gui.addFolder( 'Geometries' );
 				geometriesFolder.add( config, 'useLOD' ).onChange( v => {
-
 					const geometryInfo = batchedMesh._geometryInfo;
 					for ( let i = 0; i < geometryInfo.length; i ++ ) {
-
-						geometryInfo[ i ].LOD = v ? lods[ i ] : null;
-
+						geometryInfo[ i ].LOD = v ? lods[ i ] : null; // 开关 LOD
 					}
+				});
 
-				} );
-
+				// 事件监听
 				document.addEventListener( 'pointermove', onPointerMove );
 				window.addEventListener( 'resize', onWindowResize );
 				onWindowResize();
-			
-				renderer.setAnimationLoop( animate );
 
+				// 渲染循环
+				renderer.setAnimationLoop( animate );
 			}
 
-
+			// ====== 鼠标移动事件 ======
 			function onPointerMove( event ) {
-
 				event.preventDefault();
-
+				// 转换为标准化设备坐标 NDC (-1 ~ 1)
 				mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
 				mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
 
 				raycast();
-
 			}
-			
 
+			// ====== 窗口大小改变 ======
 			function onWindowResize() {
-
 				camera.aspect = window.innerWidth / window.innerHeight;
 				camera.updateProjectionMatrix();
-
 				renderer.setSize( window.innerWidth, window.innerHeight );
-
 			}
 
+			// ====== 射线检测 ======
 			function raycast() {
-
 				raycaster.setFromCamera( mouse, camera );
 				const intersection = raycaster.intersectObject( batchedMesh );
 
 				const batchId = intersection.length > 0 ? intersection[ 0 ].batchId : null;
-			
+
+				// 如果悬停对象未改变，直接返回
 				if ( lastHoveredInstance === batchId ) return;
 
+				// 恢复上一次悬停实例颜色
 				if ( lastHoveredInstance ) {
-
 					batchedMesh.setColorAt( lastHoveredInstance, lastHoveredColor );
-			
 				}
 
+				// 设置当前悬停实例高亮
 				if ( batchId ) {
-
-					batchedMesh.getColorAt( batchId, lastHoveredColor );
-					batchedMesh.setColorAt( batchId, highlight );
-			
+					batchedMesh.getColorAt( batchId, lastHoveredColor ); // 保存原颜色
+					batchedMesh.setColorAt( batchId, highlight ); // 高亮
 				}
 
 				lastHoveredInstance = batchId;
-
 			}
 
+			// ====== 渲染循环 ======
 			function animate() {
-
 				stats.begin();
-
 				renderer.render( scene, camera );
-
 				stats.end();
-
 			}
 
 		</script>
+
 
 	</body>
 </html>
