@@ -29,204 +29,288 @@
 		</script>
 
 		<script type="module">
-		import * as THREE from 'three';
+			// three.js 核心库
+			import * as THREE from 'three';
 
-		import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-		import { TransformControls } from 'three/addons/controls/TransformControls.js';
-		import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-		import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-		import { CCDIKSolver, CCDIKHelper } from 'three/addons/animation/CCDIKSolver.js';
-		import Stats from 'three/addons/libs/stats.module.js';
-		import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+			// 相机轨道控制（鼠标旋转/缩放视角）
+			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-		let scene, camera, renderer, orbitControls, transformControls;
-		let mirrorSphereCamera;
+			// 变换控制器（用于拖拽 IK 目标）
+			import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
-		const OOI = {};
-		let IKSolver;
+			// glTF 模型加载器
+			import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-		let stats, gui, conf;
-		const v0 = new THREE.Vector3();
+			// Draco 压缩模型解码器
+			import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
-		init();
+			// CCD 反向动力学求解器 + 可视化辅助
+			import { CCDIKSolver, CCDIKHelper } from 'three/addons/animation/CCDIKSolver.js';
 
-		async function init() {
+			// FPS 统计面板
+			import Stats from 'three/addons/libs/stats.module.js';
 
-			conf = {
-				followSphere: false,
-				turnHead: true,
-				ik_solver: true,
-				update: updateIK
-			};
+			// 调试 GUI
+			import { GUI } from 'three/addons/libs/lil-gui.module.js';
 
-			scene = new THREE.Scene();
-			scene.fog = new THREE.FogExp2( 0xffffff, .17 );
-			scene.background = new THREE.Color( 0xffffff );
+			// =========================
+			// 场景 / 相机 / 渲染器
+			// =========================
+			let scene, camera, renderer, orbitControls, transformControls;
 
-			camera = new THREE.PerspectiveCamera( 55, window.innerWidth / window.innerHeight, 0.001, 5000 );
-			camera.position.set( 0.9728517749133652, 1.1044765132727201, 0.7316689528482836 );
-			camera.lookAt( scene.position );
+			// 用于反射球的立方体相机
+			let mirrorSphereCamera;
 
-			const ambientLight = new THREE.AmbientLight( 0xffffff, 8 ); // soft white light
-			scene.add( ambientLight );
+			// OOI = Objects Of Interest（存放关键骨骼/物体）
+			const OOI = {};
 
-			const dracoLoader = new DRACOLoader();
-			dracoLoader.setDecoderPath( 'jsm/libs/draco/' );
-			const gltfLoader = new GLTFLoader();
-			gltfLoader.setDRACOLoader( dracoLoader );
+			// IK 求解器
+			let IKSolver;
 
-			const gltf = await gltfLoader.loadAsync( 'models/gltf/kira.glb' );
-			gltf.scene.traverse( n => {
+			// 工具
+			let stats, gui, conf;
+			const v0 = new THREE.Vector3();
 
-				if ( n.name === 'head' ) OOI.head = n;
-				if ( n.name === 'lowerarm_l' ) OOI.lowerarm_l = n;
-				if ( n.name === 'Upperarm_l' ) OOI.Upperarm_l = n;
-				if ( n.name === 'hand_l' ) OOI.hand_l = n;
-				if ( n.name === 'target_hand_l' ) OOI.target_hand_l = n;
+			init();
 
-				if ( n.name === 'boule' ) OOI.sphere = n;
-				if ( n.name === 'Kira_Shirt_left' ) OOI.kira = n;
+			async function init() {
 
-			} );
-			scene.add( gltf.scene );
+				// GUI 可控制的配置项
+				conf = {
+					followSphere: false, // 相机是否跟随球
+					turnHead: true,      // 头是否朝向球
+					ik_solver: true,     // 是否自动更新 IK
+					update: updateIK    // 手动调用 IK 更新
+				};
 
-			const targetPosition = OOI.sphere.position.clone(); // for orbit controls
-			OOI.hand_l.attach( OOI.sphere );
+				// =========================
+				// 场景
+				// =========================
+				scene = new THREE.Scene();
+				scene.fog = new THREE.FogExp2(0xffffff, .17);
+				scene.background = new THREE.Color(0xffffff);
 
-			// mirror sphere cube-camera
-			const cubeRenderTarget = new THREE.WebGLCubeRenderTarget( 1024 );
-			mirrorSphereCamera = new THREE.CubeCamera( 0.05, 50, cubeRenderTarget );
-			scene.add( mirrorSphereCamera );
-			const mirrorSphereMaterial = new THREE.MeshBasicMaterial( { envMap: cubeRenderTarget.texture } );
-			OOI.sphere.material = mirrorSphereMaterial;
+				// =========================
+				// 相机
+				// =========================
+				camera = new THREE.PerspectiveCamera(
+					55,
+					window.innerWidth / window.innerHeight,
+					0.001,
+					5000
+				);
+				camera.position.set(
+					0.97,
+					1.10,
+					0.73
+				);
+				camera.lookAt(scene.position);
 
-			OOI.kira.add( OOI.kira.skeleton.bones[ 0 ] );
-			const iks = [
-				{
-					target: 22, // "target_hand_l"
-					effector: 6, // "hand_l"
-					links: [
-						{
-							index: 5, // "lowerarm_l"
-							rotationMin: new THREE.Vector3( 1.2, - 1.8, - .4 ),
-							rotationMax: new THREE.Vector3( 1.7, - 1.1, .3 )
-						},
-						{
-							index: 4, // "Upperarm_l"
-							rotationMin: new THREE.Vector3( 0.1, - 0.7, - 1.8 ),
-							rotationMax: new THREE.Vector3( 1.1, 0, - 1.4 )
-						},
-					],
+				// =========================
+				// 光照（环境光）
+				// =========================
+				const ambientLight = new THREE.AmbientLight(0xffffff, 8);
+				scene.add(ambientLight);
+
+				// =========================
+				// 模型加载（Draco + glTF）
+				// =========================
+				const dracoLoader = new DRACOLoader();
+				dracoLoader.setDecoderPath('jsm/libs/draco/');
+
+				const gltfLoader = new GLTFLoader();
+				gltfLoader.setDRACOLoader(dracoLoader);
+
+				// 异步加载人物模型
+				const gltf = await gltfLoader.loadAsync('models/gltf/kira.glb');
+
+				// 遍历模型，按名字找出关键骨骼 / 物体
+				gltf.scene.traverse(n => {
+
+					// 头部（用于 lookAt）
+					if (n.name === 'head') OOI.head = n;
+
+					// 左臂 IK 链
+					if (n.name === 'lowerarm_l') OOI.lowerarm_l = n;
+					if (n.name === 'Upperarm_l') OOI.Upperarm_l = n;
+					if (n.name === 'hand_l') OOI.hand_l = n;
+					if (n.name === 'target_hand_l') OOI.target_hand_l = n;
+
+					// 镜面球
+					if (n.name === 'boule') OOI.sphere = n;
+
+					// 带骨骼的 SkinnedMesh
+					if (n.name === 'Kira_Shirt_left') OOI.kira = n;
+
+				});
+
+				scene.add(gltf.scene);
+
+				// 保存球的初始位置（给 orbitControls 用）
+				const targetPosition = OOI.sphere.position.clone();
+
+				// 把球 attach 到左手骨骼上（模拟手拿球）
+				OOI.hand_l.attach(OOI.sphere);
+
+				// =========================
+				// 镜面反射球（CubeCamera）
+				// =========================
+				const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(1024);
+				mirrorSphereCamera = new THREE.CubeCamera(0.05, 50, cubeRenderTarget);
+				scene.add(mirrorSphereCamera);
+
+				// 用 cubeCamera 作为环境贴图，实现镜面效果
+				const mirrorSphereMaterial = new THREE.MeshBasicMaterial({
+					envMap: cubeRenderTarget.texture
+				});
+				OOI.sphere.material = mirrorSphereMaterial;
+
+				// =========================
+				// IK 配置（非常关键）
+				// =========================
+
+				// 把 skeleton 的根骨骼加到 mesh 上（IK 要用）
+				OOI.kira.add(OOI.kira.skeleton.bones[0]);
+
+				const iks = [
+					{
+						target: 22,   // IK 目标骨骼（target_hand_l）
+						effector: 6,  // 末端执行器（hand_l）
+						links: [
+							{
+								index: 5, // lowerarm_l
+								rotationMin: new THREE.Vector3(1.2, -1.8, -0.4),
+								rotationMax: new THREE.Vector3(1.7, -1.1, 0.3)
+							},
+							{
+								index: 4, // Upperarm_l
+								rotationMin: new THREE.Vector3(0.1, -0.7, -1.8),
+								rotationMax: new THREE.Vector3(1.1, 0, -1.4)
+							}
+						]
+					}
+				];
+
+				// 创建 CCD IK 求解器
+				IKSolver = new CCDIKSolver(OOI.kira, iks);
+
+				// IK 可视化辅助线
+				const ccdikhelper = new CCDIKHelper(OOI.kira, iks, 0.01);
+				scene.add(ccdikhelper);
+
+				// =========================
+				// GUI 控制面板
+				// =========================
+				gui = new GUI();
+				gui.add(conf, 'followSphere').name('follow sphere');
+				gui.add(conf, 'turnHead').name('turn head');
+				gui.add(conf, 'ik_solver').name('IK auto update');
+				gui.add(conf, 'update').name('IK manual update()');
+				gui.open();
+
+				// =========================
+				// 渲染器
+				// =========================
+				renderer = new THREE.WebGLRenderer({ antialias: true });
+				renderer.setPixelRatio(window.devicePixelRatio);
+				renderer.setSize(window.innerWidth, window.innerHeight);
+				renderer.setAnimationLoop(animate);
+				document.body.appendChild(renderer.domElement);
+
+				// =========================
+				// OrbitControls（相机）
+				// =========================
+				orbitControls = new OrbitControls(camera, renderer.domElement);
+				orbitControls.minDistance = 0.2;
+				orbitControls.maxDistance = 1.5;
+				orbitControls.enableDamping = true;
+				orbitControls.target.copy(targetPosition);
+
+				// =========================
+				// TransformControls（拖拽 IK 目标）
+				// =========================
+				transformControls = new TransformControls(camera, renderer.domElement);
+				transformControls.size = 0.75;
+				transformControls.showX = false;
+				transformControls.space = 'world';
+				transformControls.attach(OOI.target_hand_l);
+				scene.add(transformControls.getHelper());
+
+				// 拖拽时禁用 orbitControls，避免冲突
+				transformControls.addEventListener('mouseDown', () => orbitControls.enabled = false);
+				transformControls.addEventListener('mouseUp', () => orbitControls.enabled = true);
+
+				// =========================
+				// FPS 统计
+				// =========================
+				stats = new Stats();
+				document.body.appendChild(stats.dom);
+
+				window.addEventListener('resize', onWindowResize);
+			}
+
+			function animate() {
+
+				// =========================
+				// 镜面球实时反射
+				// =========================
+				if (OOI.sphere && mirrorSphereCamera) {
+					OOI.sphere.visible = false;
+					OOI.sphere.getWorldPosition(mirrorSphereCamera.position);
+					mirrorSphereCamera.update(renderer, scene);
+					OOI.sphere.visible = true;
 				}
-			];
-			IKSolver = new CCDIKSolver( OOI.kira, iks );
-			const ccdikhelper = new CCDIKHelper( OOI.kira, iks, 0.01 );
-			scene.add( ccdikhelper );
 
-			gui = new GUI();
-			gui.add( conf, 'followSphere' ).name( 'follow sphere' );
-			gui.add( conf, 'turnHead' ).name( 'turn head' );
-			gui.add( conf, 'ik_solver' ).name( 'IK auto update' );
-			gui.add( conf, 'update' ).name( 'IK manual update()' );
-			gui.open();
+				// =========================
+				// 相机跟随球
+				// =========================
+				if (OOI.sphere && conf.followSphere) {
+					OOI.sphere.getWorldPosition(v0);
+					orbitControls.target.lerp(v0, 0.1);
+				}
 
-			//
+				// =========================
+				// 头部朝向球
+				// =========================
+				if (OOI.head && OOI.sphere && conf.turnHead) {
+					OOI.sphere.getWorldPosition(v0);
+					OOI.head.lookAt(v0);
 
-			renderer = new THREE.WebGLRenderer( { antialias: true } );
-			renderer.setPixelRatio( window.devicePixelRatio );
-			renderer.setSize( window.innerWidth, window.innerHeight );
-			renderer.setAnimationLoop( animate );
-			document.body.appendChild( renderer.domElement );
+					// 修正模型初始朝向（180°）
+					OOI.head.rotation.y += Math.PI;
+				}
 
-			//
+				// =========================
+				// IK 更新
+				// =========================
+				if (conf.ik_solver) {
+					updateIK();
+				}
 
-			orbitControls = new OrbitControls( camera, renderer.domElement );
-			orbitControls.minDistance = 0.2;
-			orbitControls.maxDistance = 1.5;
-			orbitControls.enableDamping = true;
-			orbitControls.target.copy( targetPosition );
-
-			transformControls = new TransformControls( camera, renderer.domElement );
-			transformControls.size = 0.75;
-			transformControls.showX = false;
-			transformControls.space = 'world';
-			transformControls.attach( OOI.target_hand_l );
-			scene.add( transformControls.getHelper() );
-
-			// disable orbitControls while using transformControls
-			transformControls.addEventListener( 'mouseDown', () => orbitControls.enabled = false );
-			transformControls.addEventListener( 'mouseUp', () => orbitControls.enabled = true );
-
-			//
-
-			stats = new Stats();
-			document.body.appendChild( stats.dom );
-
-			window.addEventListener( 'resize', onWindowResize, false );
-
-		}
-
-		function animate( ) {
-
-			if ( OOI.sphere && mirrorSphereCamera ) {
-
-				OOI.sphere.visible = false;
-				OOI.sphere.getWorldPosition( mirrorSphereCamera.position );
-				mirrorSphereCamera.update( renderer, scene );
-				OOI.sphere.visible = true;
-
+				orbitControls.update();
+				renderer.render(scene, camera);
+				stats.update();
 			}
 
-			if ( OOI.sphere && conf.followSphere ) {
+			function updateIK() {
 
-				// orbitControls follows the sphere
-				OOI.sphere.getWorldPosition( v0 );
-				orbitControls.target.lerp( v0, 0.1 );
+				// 执行 CCD IK 解算
+				if (IKSolver) IKSolver.update();
 
+				// 更新 SkinnedMesh 包围球，防止裁剪错误
+				scene.traverse(object => {
+					if (object.isSkinnedMesh) {
+						object.computeBoundingSphere();
+					}
+				});
 			}
 
-			if ( OOI.head && OOI.sphere && conf.turnHead ) {
-
-				// turn head
-				OOI.sphere.getWorldPosition( v0 );
-				OOI.head.lookAt( v0 );
-				OOI.head.rotation.set( OOI.head.rotation.x, OOI.head.rotation.y + Math.PI, OOI.head.rotation.z );
-
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
 			}
-
-			if ( conf.ik_solver ) {
-
-				updateIK();
-
-			}
-
-			orbitControls.update();
-			renderer.render( scene, camera );
-
-			stats.update(); // fps stats
-
-		}
-
-		function updateIK() {
-
-			if ( IKSolver ) IKSolver.update();
-
-			scene.traverse( function ( object ) {
-
-				if ( object.isSkinnedMesh ) object.computeBoundingSphere();
-
-			} );
-
-		}
-
-		function onWindowResize() {
-
-			camera.aspect = window.innerWidth / window.innerHeight;
-			camera.updateProjectionMatrix();
-
-			renderer.setSize( window.innerWidth, window.innerHeight );
-
-		}
 		</script>
+
 	</body>
 </html>

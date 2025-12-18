@@ -38,94 +38,161 @@
 
 		<script type="module">
 
+			// 引入 Three.js 核心库（场景、相机、渲染器、材质等）
 			import * as THREE from 'three';
 
+			// 性能监控工具，用于显示 FPS、渲染耗时
 			import Stats from 'three/addons/libs/stats.module.js';
 
+			// 轨道控制器：鼠标旋转 / 缩放 / 惯性
 			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+			// 室内环境光，用于生成真实的 PBR 环境贴图
 			import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
+			// glTF / glb 模型加载器
 			import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+			// Draco 压缩模型解码器
 			import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
+			// 动画混合器（播放 glTF 动画）
 			let mixer;
 
+			// Three.js 时钟，用于计算每一帧的时间差，保证动画速度稳定
 			const clock = new THREE.Clock();
-			const container = document.getElementById( 'container' );
 
+			// 页面容器，用于挂载 WebGL canvas
+			const container = document.getElementById('container');
+
+			// 创建性能监控面板并添加到页面
 			const stats = new Stats();
-			container.appendChild( stats.dom );
+			container.appendChild(stats.dom);
 
-			const renderer = new THREE.WebGLRenderer( { antialias: true } );
-			renderer.setPixelRatio( window.devicePixelRatio );
-			renderer.setSize( window.innerWidth, window.innerHeight );
-			container.appendChild( renderer.domElement );
+			// 创建 WebGL 渲染器，开启抗锯齿
+			const renderer = new THREE.WebGLRenderer({ antialias: true });
 
-			const pmremGenerator = new THREE.PMREMGenerator( renderer );
+			// 适配高分辨率屏幕（如 Retina）
+			renderer.setPixelRatio(window.devicePixelRatio);
 
+			// 设置渲染尺寸
+			renderer.setSize(window.innerWidth, window.innerHeight);
+
+			// 将渲染器的 canvas 插入到页面
+			container.appendChild(renderer.domElement);
+
+			// 用于将环境场景转换为 PBR 可用的环境贴图
+			const pmremGenerator = new THREE.PMREMGenerator(renderer);
+
+			// 创建场景
 			const scene = new THREE.Scene();
-			scene.background = new THREE.Color( 0xbfe3dd );
-			scene.environment = pmremGenerator.fromScene( new RoomEnvironment(), 0.04 ).texture;
 
-			const camera = new THREE.PerspectiveCamera( 40, window.innerWidth / window.innerHeight, 1, 100 );
-			camera.position.set( 5, 2, 8 );
+			// 设置场景背景色
+			scene.background = new THREE.Color(0xbfe3dd);
 
-			const controls = new OrbitControls( camera, renderer.domElement );
-			controls.target.set( 0, 0.5, 0 );
+			// 使用 RoomEnvironment 生成真实的环境光反射（PBR）
+			scene.environment = pmremGenerator
+				.fromScene(new RoomEnvironment(), 0.04)
+				.texture;
+
+			// 创建透视相机
+			// 参数：视野角度 / 宽高比 / 近裁剪面 / 远裁剪面
+			const camera = new THREE.PerspectiveCamera(
+				40,
+				window.innerWidth / window.innerHeight,
+				1,
+				100
+			);
+
+			// 设置相机位置
+			camera.position.set(5, 2, 8);
+
+			// 创建轨道控制器
+			const controls = new OrbitControls(camera, renderer.domElement);
+
+			// 设置相机围绕的目标点
+			controls.target.set(0, 0.5, 0);
 			controls.update();
+
+			// 禁止平移
 			controls.enablePan = false;
+
+			// 启用阻尼（惯性），让操作更顺滑
 			controls.enableDamping = true;
 
+			// 创建 Draco 解码器
 			const dracoLoader = new DRACOLoader();
-			dracoLoader.setDecoderPath( 'jsm/libs/draco/gltf/' );
 
+			// 设置 Draco 解码器路径（包含 wasm / js 文件）
+			dracoLoader.setDecoderPath('jsm/libs/draco/gltf/');
+
+			// 创建 glTF 模型加载器
 			const loader = new GLTFLoader();
-			loader.setDRACOLoader( dracoLoader );
-			loader.load( 'models/gltf/LittlestTokyo.glb', function ( gltf ) {
 
-				const model = gltf.scene;
-				model.position.set( 1, 1, 0 );
-				model.scale.set( 0.01, 0.01, 0.01 );
-				scene.add( model );
+			// 让 GLTFLoader 支持 Draco 压缩模型
+			loader.setDRACOLoader(dracoLoader);
 
-				mixer = new THREE.AnimationMixer( model );
-				mixer.clipAction( gltf.animations[ 0 ] ).play();
+			// 加载 glb 模型
+			loader.load(
+				'models/gltf/LittlestTokyo.glb',
+				function (gltf) {
 
-				renderer.setAnimationLoop( animate );
+					// 获取模型根节点
+					const model = gltf.scene;
 
-			}, undefined, function ( e ) {
+					// 设置模型位置
+					model.position.set(1, 1, 0);
 
-				console.error( e );
+					// 缩放模型（原模型尺寸较大）
+					model.scale.set(0.01, 0.01, 0.01);
 
-			} );
+					// 将模型加入场景
+					scene.add(model);
 
+					// 创建动画混合器，用于播放模型动画
+					mixer = new THREE.AnimationMixer(model);
 
+					// 播放 glTF 中的第一个动画
+					mixer.clipAction(gltf.animations[0]).play();
+
+					// 启动渲染循环（WebXR 兼容）
+					renderer.setAnimationLoop(animate);
+				},
+				undefined,
+				function (e) {
+					// 加载失败时输出错误
+					console.error(e);
+				}
+			);
+
+			// 窗口尺寸变化时，更新相机和渲染器
 			window.onresize = function () {
-
 				camera.aspect = window.innerWidth / window.innerHeight;
 				camera.updateProjectionMatrix();
-
-				renderer.setSize( window.innerWidth, window.innerHeight );
-
+				renderer.setSize(window.innerWidth, window.innerHeight);
 			};
 
-
+			// 动画与渲染循环
 			function animate() {
 
+				// 获取当前帧与上一帧的时间差（秒）
 				const delta = clock.getDelta();
 
-				mixer.update( delta );
+				// 更新模型动画
+				mixer.update(delta);
 
+				// 更新轨道控制器（阻尼生效必须调用）
 				controls.update();
 
+				// 更新性能监控面板
 				stats.update();
 
-				renderer.render( scene, camera );
-
+				// 渲染场景
+				renderer.render(scene, camera);
 			}
 
-
 		</script>
+
 
 	</body>
 
